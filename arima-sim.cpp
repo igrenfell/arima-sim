@@ -2,13 +2,13 @@
 #include <vector>
 #include <random>
 #include <fstream>
-
+#include <cmath>
 
 
 
 static constexpr double bad_number = -9999.0;
 static constexpr double epsilon = 0.000000000000000001;
-
+static constexpr double pi = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679;
 
 bool isFilterOk(double value)
 {
@@ -134,6 +134,31 @@ std::vector<double> derive_autocorrelation(const std::vector<double>& ar_coeffs,
     return acf;
 }
 
+double von_mises(double mean, double kappa, std::mt19937& generator) {
+    std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
+    std::normal_distribution<double> normal_dist(0.0, 1.0);
+
+    double tau = 1.0 + std::sqrt(1.0 + 4.0 * kappa * kappa);
+    double rho = (tau - std::sqrt(2.0 * tau)) / (2.0 * kappa);
+    double r = (1.0 + rho * rho) / (2.0 * rho);
+
+    while (true) {
+        double u1 = uniform_dist(generator);
+        double z = std::cos(pi * u1);
+        double f = (1.0 + r * z) / (r + z);
+        double c = kappa * (r - f);
+
+        double u2 = uniform_dist(generator);
+        if (u2 < c * (2.0 - c) || u2 <= c * std::exp(1.0 - c)) {
+            double u3 = uniform_dist(generator);
+            double theta = mean + std::copysign(1.0, u3 - 0.5) * std::acos(f);
+            return theta;
+        }
+    }
+}
+
+
+
 
 std::vector<double> ArrayToVector(double* arr, size_t arr_len) {
     return std::vector<double>(arr, arr + arr_len);
@@ -166,7 +191,7 @@ std::vector<double> simulateARIMA(int p, int d, int q, double *phi, double *thet
     for (int i = 0; i < p; i++)
         cc -= phi[i] * acfvec[i];
     //cc = sqrt(cc);
-    double sig2 = 2;
+    double sig2 = 0.05;
     double scfac =  sig2 / cc;
     scfac = sqrt(scfac);
 
@@ -196,17 +221,23 @@ int main() {
     // Define ARIMA parameters
     int p = 6; // Autoregressive terms
     int d = 0; // Difference terms
-    int q = 0; // Moving average terms
+    int q = 1; // Moving average terms
 
     // ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
-    double theta[]{ 0.0 }; // Moving average coefficients
+    double theta[]{ 0.1 }; // Moving average coefficients
 
     // Number of samples to simulate
     int num_samples = 1000;
 
     // Simulate ARIMA process
     std::vector<double> simulated_series = simulateARIMA(p, d, q, phi, theta, num_samples);
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    double vmmean = 1.0;
+    double vmkappa = 2;
+
+    std::mt19937 gen(rd());
 
     // Output simulated series
     //for (int i = 0; i < num_samples; ++i) {
@@ -221,9 +252,10 @@ int main() {
     {
 
         double sample = simulated_series[i];
+        double vmsample = von_mises(vmmean, vmkappa, generator);
        // sample = sample * sig2;
         //sample = sample * cc;
-        outfile << sample << std::endl;
+        outfile << sample << "," << vmsample << std::endl;
 
         //file << MagWind << sample << '\n';
 
@@ -235,3 +267,6 @@ int main() {
 
     return 0;
 }
+
+
+
