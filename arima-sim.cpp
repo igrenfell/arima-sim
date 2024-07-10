@@ -1,8 +1,12 @@
+//This program will take the parameters set at the beginning of the main function (around line 230) and output a two column csv, the first being the simulated magnitudues
+//and the second being the direction.
+
 #include <iostream>
 #include <vector>
 #include <random>
 #include <fstream>
 #include <cmath>
+
 
 
 
@@ -223,10 +227,14 @@ int main() {
     int d = 0; // Difference terms
     int q = 1; // Moving average terms
 
+
+    //set all coefficients here
+    // 
     // ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
     double theta[]{ 0.1 }; // Moving average coefficients
-
+    double vmmean = 1.0; //von mises mean direction in radians counterclockwise from east
+    double vmkappa = 2,0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
     // Number of samples to simulate
     int num_samples = 1000;
 
@@ -234,8 +242,7 @@ int main() {
     std::vector<double> simulated_series = simulateARIMA(p, d, q, phi, theta, num_samples);
     std::random_device rd;
     std::mt19937 generator(rd());
-    double vmmean = 1.0;
-    double vmkappa = 2;
+    
 
     std::mt19937 gen(rd());
 
