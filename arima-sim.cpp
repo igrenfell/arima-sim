@@ -171,7 +171,7 @@ std::vector<double> ArrayToVector(double* arr, size_t arr_len) {
 
 
 // Function to simulate ARIMA process
-std::vector<double> simulateARIMA(int p, int d, int q, double *phi, double *theta, int num_samples) {
+std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples) {
     // Initialize variables
     std::vector<double> simulated_series(num_samples, 0.0);
     std::default_random_engine generator;
@@ -187,12 +187,12 @@ std::vector<double> simulateARIMA(int p, int d, int q, double *phi, double *thet
     
 
     std::vector<double> arvec, mavec, acfvec;
-    arvec = ArrayToVector(phi, p);
-    mavec = ArrayToVector(theta, q);
+    arvec = ArrayToVector(phi, sizeof(*phi));
+    mavec = ArrayToVector(theta, sizeof(*theta));
     acfvec = derive_autocorrelation(arvec, mavec, k);
     double cc = 1.0;
 
-    for (int i = 0; i < p; i++)
+    for (int i = 0; i < sizeof(*phi); i++)
         cc -= phi[i] * acfvec[i];
     //cc = sqrt(cc);
     double sig2 = 0.05;
@@ -222,38 +222,27 @@ std::vector<double> simulateARIMA(int p, int d, int q, double *phi, double *thet
 
 
 int main() {
-    // Define ARIMA parameters
-    int p = 6; // Autoregressive terms
-    int d = 0; // Difference terms
-    int q = 1; // Moving average terms
 
-
-    //set all coefficients here
-    // 
-    // ARIMA coefficients
+    // set all ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
     double theta[]{ 0.1 }; // Moving average coefficients
     double vmmean = 1.0; //von mises mean direction in radians counterclockwise from east
-    double vmkappa = 2,0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
+    double vmkappa = 2.0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
+
     // Number of samples to simulate
     int num_samples = 1000;
 
     // Simulate ARIMA process
-    std::vector<double> simulated_series = simulateARIMA(p, d, q, phi, theta, num_samples);
+    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples);
     std::random_device rd;
     std::mt19937 generator(rd());
     
-
     std::mt19937 gen(rd());
-
     // Output simulated series
-    //for (int i = 0; i < num_samples; ++i) {
+    //for (int i = 0; i < num_samples; ++i) {lear
     //    std::cout << simulated_series[i] << std::endl;
     //}
-
-
     std::ofstream outfile("output.txt");
-
 
     for (int i = 0; i < num_samples; i++)
     {
@@ -270,7 +259,6 @@ int main() {
     }
 
     outfile.close();
-
 
     return 0;
 }
