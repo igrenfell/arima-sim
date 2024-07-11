@@ -171,7 +171,7 @@ std::vector<double> ArrayToVector(double* arr, size_t arr_len) {
 
 
 // Function to simulate ARIMA process
-std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples) {
+std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, double sig2) {
     // Initialize variables
     std::vector<double> simulated_series(num_samples, 0.0);
     std::default_random_engine generator;
@@ -195,7 +195,6 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples) {
     for (int i = 0; i < sizeof(*phi); i++)
         cc -= phi[i] * acfvec[i];
     //cc = sqrt(cc);
-    double sig2 = 0.05;
     double scfac =  sig2 / cc;
     scfac = sqrt(scfac);
 
@@ -223,17 +222,20 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples) {
 
 int main() {
 
+    //mean and sd of wind magnitude
+    double sig2 = 0.10;
+    double meanwind = 1.0;
     // set all ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
     double theta[]{ 0.1 }; // Moving average coefficients
-    double vmmean = 1.0; //von mises mean direction in radians counterclockwise from east
-    double vmkappa = 2.0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
+    double vmmean = 1.5*pi; //von mises mean direction in radians counterclockwise from east
+    double vmkappa = 20.0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
 
     // Number of samples to simulate
     int num_samples = 1000;
 
     // Simulate ARIMA process
-    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples);
+    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples, sig2);
     std::random_device rd;
     std::mt19937 generator(rd());
     
@@ -249,9 +251,13 @@ int main() {
 
         double sample = simulated_series[i];
         double vmsample = von_mises(vmmean, vmkappa, generator);
+        double vmdegrees = 90 - (vmsample / pi) * 180;
+        if (vmdegrees < 0) {
+            vmdegrees += 360.0;
+        }        
        // sample = sample * sig2;
         //sample = sample * cc;
-        outfile << sample << "," << vmsample << std::endl;
+        outfile << sample + meanwind << "," << vmdegrees << std::endl;
 
         //file << MagWind << sample << '\n';
 
