@@ -171,7 +171,7 @@ std::vector<double> ArrayToVector(double* arr, size_t arr_len) {
 
 
 // Function to simulate ARIMA process
-std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, double sig2) {
+std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, double sig2, double meanwind) {
     // Initialize variables
     std::vector<double> simulated_series(num_samples, 0.0);
     std::default_random_engine generator;
@@ -213,17 +213,12 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
     //applyMovingAverageFilter(simulated_series, thetavec);
 
 
+    for (int i = 0; i < simulated_series.size(); i++){
+        simulated_series[i] = simulated_series[i]+meanwind;
+    }
+
     return simulated_series;
 }
-
-void addMeanWindToSeries(std::vector<double> &series, double meanwind) {
-
-    for (int i = 0; i < series.size(); i++){
-        series[i] = series[i]+meanwind;
-    }
-}
-
-
 
 int main() {
 
@@ -240,7 +235,7 @@ int main() {
     int num_samples = 1000;
 
     // Simulate ARIMA process
-    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples, sig2);
+    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples, sig2, meanwind);
     std::random_device rd;
     std::mt19937 generator(rd());
     
@@ -250,8 +245,6 @@ int main() {
     //    std::cout << simulated_series[i] << std::endl;
     //}
     std::ofstream outfile("output.txt");
-
-    addMeanWindToSeries(simulated_series, meanwind);
 
     for (int i = 0; i < num_samples; i++)
     {
