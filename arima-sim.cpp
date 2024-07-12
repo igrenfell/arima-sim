@@ -216,7 +216,12 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
     return simulated_series;
 }
 
+void addMeanWindToSeries(std::vector<double> &series, double meanwind) {
 
+    for (int i = 0; i < series.size(); i++){
+        series[i] = series[i]+meanwind;
+    }
+}
 
 
 
@@ -224,7 +229,7 @@ int main() {
 
     //mean and sd of wind magnitude
     double sig2 = 0.10;
-    double meanwind = 1.0;
+    double meanwind = 5.0;
     // set all ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
     double theta[]{ 0.1 }; // Moving average coefficients
@@ -246,6 +251,8 @@ int main() {
     //}
     std::ofstream outfile("output.txt");
 
+    addMeanWindToSeries(simulated_series, meanwind);
+
     for (int i = 0; i < num_samples; i++)
     {
 
@@ -257,7 +264,7 @@ int main() {
         }        
        // sample = sample * sig2;
         //sample = sample * cc;
-        outfile << sample + meanwind << "," << vmdegrees << std::endl;
+        outfile << sample << "," << vmdegrees << std::endl;
 
         //file << MagWind << sample << '\n';
 
