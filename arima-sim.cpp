@@ -228,8 +228,10 @@ int main() {
     // set all ARIMA coefficients
     double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
     double theta[]{ 0.1 }; // Moving average coefficients
-    double vmmean = 1.5*pi; //von mises mean direction in radians counterclockwise from east
-    double vmkappa = 20.0; //von mises shape parameter: 1.0 => uniform direction, higher values imply a "pointier" distribution
+    //von mises input varaibles
+    double angle_input = 270.0; //degrees east of north
+    double vmmean = pi * (-angle_input + 90) / 180.0; //radians north of east
+    double vmkappa = 30.0;
 
     // Number of samples to simulate
     int num_samples = 1000;
