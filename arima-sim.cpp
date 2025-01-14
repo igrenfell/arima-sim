@@ -220,56 +220,35 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
     return simulated_series;
 }
 
-int main() {
-
-    //mean and sd of wind magnitude
-    double sig2 = 0.10;
-    double meanwind = 5.0;
-    // set all ARIMA coefficients
-    double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
-    double theta[]{ 0.1 }; // Moving average coefficients
-    //von mises input varaibles
-    double angle_input = 270.0; //degrees east of north
-    double vmmean = pi * (-angle_input + 90) / 180.0; //radians north of east
-    double vmkappa = 30.0;
-
-    // Number of samples to simulate
-    int num_samples = 1000;
-
-    // Simulate ARIMA process
-    std::vector<double> simulated_series = simulateARIMA(phi, theta, num_samples, sig2, meanwind);
-    std::random_device rd;
-    std::mt19937 generator(rd());
-    
-    std::mt19937 gen(rd());
-    // Output simulated series
-    //for (int i = 0; i < num_samples; ++i) {lear
-    //    std::cout << simulated_series[i] << std::endl;
-    //}
-    std::ofstream outfile("output.txt");
-
     for (int i = 0; i < num_samples; i++)
     {
 
         double sample = simulated_series[i];
         double vmsample = von_mises(vmmean, vmkappa, generator);
+        int vmdegreesint;
         double vmdegrees = 90 - (vmsample / pi) * 180;
+  
         if (vmdegrees < 0) {
             vmdegrees += 360.0;
-        }        
+        }
+
+        if (sample < 0.0)
+        {
+            vmdegrees = vmdegrees + 180.0;
+            sample = -sample;
+
+        }
+
+        vmdegreesint = int(vmdegrees);
+        vmdegreesint = vmdegreesint % 360;
        // sample = sample * sig2;
         //sample = sample * cc;
-        outfile << sample << "," << vmdegrees << std::endl;
+        outfile << sample + meanwind << "," << vmdegreesint << std::endl;
 
         //file << MagWind << sample << '\n';
 
        // std::cout << sample << std::endl;
     }
-
-    outfile.close();
-
-    return 0;
-}
 
 
 
