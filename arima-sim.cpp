@@ -171,7 +171,7 @@ std::vector<double> ArrayToVector(double* arr, size_t arr_len) {
 
 
 // Function to simulate ARIMA process
-std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, double sig2, double meanwind) {
+std::vector<double> simulateARIMA(double *phi, int phi_size, double *theta, int theta_size, int num_samples, double sig2, double meanwind) {
     // Initialize variables
     std::vector<double> simulated_series(num_samples, 0.0);
     std::default_random_engine generator;
@@ -187,8 +187,8 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
     
 
     std::vector<double> arvec, mavec, acfvec;
-    arvec = ArrayToVector(phi, sizeof(*phi));
-    mavec = ArrayToVector(theta, sizeof(*theta));
+    arvec = ArrayToVector(phi, phi_size);
+    mavec = ArrayToVector(theta, theta_size);
     acfvec = derive_autocorrelation(arvec, mavec, k);
     double cc = 1.0;
 
@@ -220,6 +220,35 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
     return simulated_series;
 }
 
+
+int main() {
+    //mean and sd of wind magnitude
+    double sig2 = 0.0;
+    double meanwind = 5.0;
+    // set all ARIMA coefficients
+    double phi[] = { 1.17, -0.321, 0.0785, -0.0182, -0.00601, 0.0724 };  // Autoregressive coefficients
+    int phi_size = 6;
+    double theta[]{ 0.1 }; // Moving average coefficients
+    int theta_size = 1;
+    //von mises input varaibles
+    double angle_input = 0.0; //degrees east of north
+    double vmmean = pi * (-angle_input + 90) / 180.0; //radians north of east
+    double vmkappa = 1.0;
+    // Number of samples to simulate
+    int num_samples = 1000;
+    // Simulate ARIMA process
+    std::vector<double> simulated_series = simulateARIMA(phi, phi_size, theta, theta_size, num_samples, sig2, meanwind);
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    
+    std::mt19937 gen(rd());
+    // Output simulated series
+    //for (int i = 0; i < num_samples; ++i) {lear
+    //    std::cout << simulated_series[i] << std::endl;
+    //}
+    std::ofstream outfile("output.txt");
+
+
     for (int i = 0; i < num_samples; i++)
     {
 
@@ -243,12 +272,11 @@ std::vector<double> simulateARIMA(double *phi, double *theta, int num_samples, d
         vmdegreesint = vmdegreesint % 360;
        // sample = sample * sig2;
         //sample = sample * cc;
-        outfile << sample + meanwind << "," << vmdegreesint << std::endl;
+        outfile << sample << "," << vmdegreesint << std::endl;
 
         //file << MagWind << sample << '\n';
 
        // std::cout << sample << std::endl;
     }
-
-
+}
 
