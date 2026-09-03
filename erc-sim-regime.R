@@ -532,7 +532,7 @@ dev.off()
 # Each PC score is treated as iid in time (the AR filter has already removed
 # temporal autocorrelation). Spatial correlation is recovered automatically
 # through the EOF rotation.
-nyear.sim <- 10000
+nyear.sim <- 20000
 n.sim     <- nyear.sim * 365
 
 # seed so runs are comparable: this single draw feeds residsim.eof, and
@@ -647,86 +647,152 @@ ndur.cs <- 6L
 # pool with below-threshold days. Anchoring a breakpoint at 0 fixes that.
 mbrk.q  <- c(0.20, 0.45, 0.65)
 mbrk.f  <- c(-0.5, -0.2, 0, 0.2, 0.5, 1.0)
-durbin  <- function(d) ifelse(d < 2L, 1L, ifelse(d < 3L, 2L, ifelse(d < 4L, 3L,
-                       ifelse(d < 7L, 4L, ifelse(d < 14L, 5L, 6L)))))
+spell.age.bin <- function(age) ifelse(age <  2L, 1L,
+                            ifelse(age <  3L, 2L,
+                            ifelse(age <  4L, 3L,
+                            ifelse(age <  7L, 4L,
+                            ifelse(age < 14L, 5L, 6L)))))
 
-B0 <- matrix(0, p.reg + 1L, n.valid)   # below-threshold regime: intercept + phi
-B1 <- matrix(0, p.reg + 1L, n.valid)   # above-threshold regime
-Elist <- Mlist <- Dlist <- vector("list", n.valid)
-for (s in 1:n.valid) {
-  x  <- resids.valid[, s]; n <- length(x)
-  X  <- embed(x, p.reg + 1L); y <- X[, 1]; Lg <- X[, -1, drop = FALSE]
-  lag.idx <- seq_len(n - p.reg) + p.reg - 1L          # index of t-1
-  qq <- q.obs[((lag.idx - 1L) %% 365L) + 1L, s]
-  st <- as.integer(x >= rep(q.obs[, s], length(yearseq)))
-  rr <- rle(st); dv <- unlist(lapply(rr$lengths, seq_len))
-  reg <- st[lag.idx]                                  # regime from state at t-1
-  Z  <- cbind(1, Lg)
-  fitreg <- function(k) {
-    i <- which(reg == k)
-    if (length(i) < 5 * (p.reg + 1L)) return(NULL)
-    tryCatch(qr.solve(Z[i, , drop = FALSE], y[i]), error = function(e) NULL)
+# AR coefficients per regime: row 1 is the intercept, rows 2..p+1 are the phis
+ar.coef.below <- matrix(0, p.reg + 1L, n.valid)
+ar.coef.above <- matrix(0, p.reg + 1L, n.valid)
+
+# per-pyrome diagnostics feeding the conditional innovation pools below.
+# All three are aligned: one entry per usable day t.
+innov.list     <- vector("list", n.valid)   # innovation at t
+margin.list    <- vector("list", n.valid)   # x[t-1] - threshold(t-1)
+spell.age.list <- vector("list", n.valid)   # age of the current spell at t-1
+
+for (pyrome in 1:n.valid) {
+  cur.pyrome.resids <- resids.valid[, pyrome]
+  n.days <- length(cur.pyrome.resids)
+
+  # embed() gives one row per usable day, each row a reversed sliding window:
+  # column 1 is x[t], column 2 is x[t-1], ... column p+1 is x[t-p]. Splitting
+  # column 1 off turns "fit an AR(p)" into an ordinary linear regression.
+  embed.mat  <- embed(cur.pyrome.resids, p.reg + 1L)
+  resid.t    <- embed.mat[, 1]
+  resid.lags <- embed.mat[, -1, drop = FALSE]
+
+  # position in the ORIGINAL series of the t-1 observation for each row, used
+  # to look up the day-of-year threshold and the spell age at t-1
+  prev.day.idx <- seq_len(n.days - p.reg) + p.reg - 1L
+
+  # the P80 threshold in anomaly units moves with day-of-year, because the
+  # standardisation divides by a seasonally varying SD
+  thr.prev.day <- q.obs[((prev.day.idx - 1L) %% 365L) + 1L, pyrome]
+
+  # above/below state for every day, then the age of the spell each day sits
+  # in: rle lengths 3,2,1 -> seq_len each -> 1,2,3,1,2,1
+  is.above   <- as.integer(cur.pyrome.resids >=
+                           rep(q.obs[, pyrome], length(yearseq)))
+  spell.runs <- rle(is.above)
+  spell.age  <- unlist(lapply(spell.runs$lengths, seq_len))
+
+  # regime is set by YESTERDAY's state, so it is known before x[t] is drawn
+  # and the model stays causally simulable
+  regime.prev.day <- is.above[prev.day.idx]
+
+  design.mat <- cbind(1, resid.lags)
+
+  # separate least-squares AR fit on each regime's rows; require 5 observations
+  # per parameter before trusting the fit
+  fit.regime <- function(regime) {
+    rows <- which(regime.prev.day == regime)
+    if (length(rows) < 5 * (p.reg + 1L)) return(NULL)
+    tryCatch(qr.solve(design.mat[rows, , drop = FALSE], resid.t[rows]),
+             error = function(e) NULL)
   }
-  b0 <- fitreg(0L); b1 <- fitreg(1L)
-  if (is.null(b0)) b0 <- qr.solve(Z, y)
-  if (is.null(b1)) b1 <- b0
-  B0[, s] <- b0; B1[, s] <- b1
-  pred <- ifelse(reg == 1L, as.numeric(Z %*% b1), as.numeric(Z %*% b0))
-  Elist[[s]] <- y - pred
-  Mlist[[s]] <- Lg[, 1] - qq
-  Dlist[[s]] <- dv[lag.idx]
+  coef.below <- fit.regime(0L)
+  coef.above <- fit.regime(1L)
+
+  # dry pyromes may never spend enough time above threshold: fall back to the
+  # pooled fit, then to reusing the below-threshold coefficients
+  if (is.null(coef.below)) coef.below <- qr.solve(design.mat, resid.t)
+  if (is.null(coef.above)) coef.above <- coef.below
+
+  ar.coef.below[, pyrome] <- coef.below
+  ar.coef.above[, pyrome] <- coef.above
+
+  # one-step-ahead fit under whichever regime applied; its residual is the
+  # innovation whose conditional shape is modelled below
+  fitted.vals <- ifelse(regime.prev.day == 1L,
+                        as.numeric(design.mat %*% coef.above),
+                        as.numeric(design.mat %*% coef.below))
+  innov.list[[pyrome]]     <- resid.t - fitted.vals
+  margin.list[[pyrome]]    <- resid.lags[, 1] - thr.prev.day
+  spell.age.list[[pyrome]] <- spell.age[prev.day.idx]
 }
 cat(sprintf("regime AR persistence: below sum(phi)=%.4f  above sum(phi)=%.4f\n",
-            mean(colSums(B0[-1, , drop = FALSE])), mean(colSums(B1[-1, , drop = FALSE]))))
+            mean(colSums(ar.coef.below[-1, , drop = FALSE])),
+            mean(colSums(ar.coef.above[-1, , drop = FALSE]))))
 
-BRK.cs  <- sort(unique(c(as.numeric(quantile(unlist(Mlist), mbrk.q)), mbrk.f)))
-nlev.cs <- length(BRK.cs) + 1L
-ncell   <- nlev.cs * ndur.cs
-POOLl <- vector("list", n.valid * ncell)
-LENv  <- integer(n.valid * ncell)
-kk    <- 0L
-for (s in 1:n.valid) {
-  lb <- findInterval(Mlist[[s]], BRK.cs) + 1L
-  db <- durbin(Dlist[[s]]); e <- Elist[[s]]
-  for (a in 1:nlev.cs) for (b in 1:ndur.cs) {
-    ii <- which(lb == a & db == b)
-    if (length(ii) < 25) ii <- which(lb == a)     # fall back to margin-only
-    if (length(ii) < 5)  ii <- seq_along(e)       # then to unconditional
-    kk <- kk + 1L
-    POOLl[[kk]] <- sort(e[ii]); LENv[kk] <- length(ii)
+margin.breaks <- sort(unique(c(as.numeric(quantile(unlist(margin.list), mbrk.q)),
+                               mbrk.f)))
+n.margin.bins <- length(margin.breaks) + 1L
+n.cells       <- n.margin.bins * ndur.cs
+
+# Empirical innovation distribution per (margin bin, spell-age bin) cell, stored
+# sorted so it can be used as a quantile function. Flattened into one vector
+# with an offset table rather than a list of lists, so the recursion below can
+# index it arithmetically.
+innov.pool.list <- vector("list", n.valid * n.cells)
+cell.n          <- integer(n.valid * n.cells)
+cell.idx        <- 0L
+for (pyrome in 1:n.valid) {
+  margin.bin <- findInterval(margin.list[[pyrome]], margin.breaks) + 1L
+  age.bin    <- spell.age.bin(spell.age.list[[pyrome]])
+  innovs     <- innov.list[[pyrome]]
+  for (mb in 1:n.margin.bins) for (ab in 1:ndur.cs) {
+    rows <- which(margin.bin == mb & age.bin == ab)
+    if (length(rows) < 25) rows <- which(margin.bin == mb)  # margin-only
+    if (length(rows) < 5)  rows <- seq_along(innovs)        # unconditional
+    cell.idx <- cell.idx + 1L
+    innov.pool.list[[cell.idx]] <- sort(innovs[rows])
+    cell.n[cell.idx] <- length(rows)
   }
 }
-POOL <- unlist(POOLl); rm(POOLl, Elist, Mlist, Dlist)
-OFFv <- c(0L, cumsum(LENv)[-length(LENv)])        # flat index order: s, then a, then b
+innov.pool <- unlist(innov.pool.list)
+rm(innov.pool.list, innov.list, margin.list, spell.age.list)
+# flat index order: pyrome, then margin bin, then age bin
+cell.offset <- c(0L, cumsum(cell.n)[-length(cell.n)])
 
 # consume residsim.eof in place: convert to uniforms via per-pyrome ranks
-for (s in 1:n.valid)
-  residsim.eof[, s] <- rank(residsim.eof[, s], ties.method = "average") / (n.sim + 1)
+for (pyrome in 1:n.valid)
+  residsim.eof[, pyrome] <- rank(residsim.eof[, pyrome],
+                                 ties.method = "average") / (n.sim + 1)
 
-xs.cs    <- matrix(0, n.sim, n.valid)
-st.prev  <- integer(n.valid)
-dur.prev <- rep(1L, n.valid)
-sidx     <- 1:n.valid
-soff     <- (sidx - 1L) * ncell
-a0 <- B0[1, ]; a1 <- B1[1, ]
-C0 <- B0[-1, , drop = FALSE]; C1 <- B1[-1, , drop = FALSE]
-t1 <- Sys.time()
+sim.resids     <- matrix(0, n.sim, n.valid)
+was.above      <- integer(n.valid)
+spell.age.prev <- rep(1L, n.valid)
+pyrome.idx     <- 1:n.valid
+pyrome.offset  <- (pyrome.idx - 1L) * n.cells
+intercept.below <- ar.coef.below[1, ]
+intercept.above <- ar.coef.above[1, ]
+phi.below <- ar.coef.below[-1, , drop = FALSE]
+phi.above <- ar.coef.above[-1, , drop = FALSE]
+recursion.start <- Sys.time()
 for (t in (p.reg + 1L):n.sim) {
-  xl   <- xs.cs[(t - 1L):(t - p.reg), , drop = FALSE]
-  marg <- xs.cs[t - 1L, ] - q.sim[t - 1L, ]
+  recent.lags <- sim.resids[(t - 1L):(t - p.reg), , drop = FALSE]
+  margin      <- sim.resids[t - 1L, ] - q.sim[t - 1L, ]
   # regime-dependent AR: both predictions are formed and selected, which is
   # cheaper per step than rebuilding a coefficient matrix 365k times
-  lin  <- ifelse(marg >= 0, a1 + colSums(C1 * xl), a0 + colSums(C0 * xl))
-  lev  <- findInterval(marg, BRK.cs) + 1L
-  fidx <- durbin(dur.prev) + (lev - 1L) * ndur.cs + soff
-  eps  <- POOL[OFFv[fidx] + pmax(1L, ceiling(residsim.eof[t, ] * LENv[fidx]))]
-  v    <- pmax(pmin(lin + eps, guard), -guard)
-  xs.cs[t, ] <- v
-  st.now   <- as.integer(v >= q.sim[t, ])
-  dur.prev <- ifelse(st.now == st.prev, dur.prev + 1L, 1L)
-  st.prev  <- st.now
+  cond.mean <- ifelse(margin >= 0,
+                      intercept.above + colSums(phi.above * recent.lags),
+                      intercept.below + colSums(phi.below * recent.lags))
+  margin.bin <- findInterval(margin, margin.breaks) + 1L
+  cell.idx   <- spell.age.bin(spell.age.prev) +
+                (margin.bin - 1L) * ndur.cs + pyrome.offset
+  # draw from this cell's empirical innovation quantile function
+  innov <- innov.pool[cell.offset[cell.idx] +
+                      pmax(1L, ceiling(residsim.eof[t, ] * cell.n[cell.idx]))]
+  new.resid <- pmax(pmin(cond.mean + innov, guard), -guard)
+  sim.resids[t, ] <- new.resid
+  is.above.now   <- as.integer(new.resid >= q.sim[t, ])
+  spell.age.prev <- ifelse(is.above.now == was.above, spell.age.prev + 1L, 1L)
+  was.above      <- is.above.now
 }
-cat("regime-switching recursion: "); print(Sys.time() - t1)
+cat("regime-switching recursion: "); print(Sys.time() - recursion.start)
 
 # Physical ceiling on ERC. ERC takes no wind or slope input, so it is a function
 # of the fuel-moisture classes against fixed fuel-model parameters and attains a
@@ -749,25 +815,28 @@ cat("regime-switching recursion: "); print(Sys.time() - t1)
 # length: P80 sits far below the ceiling, so a clipped day is still above P80.
 erc.max <- 121
 
-output.cs <- matrix(NA_real_, n.sim, n.valid)
+# back to ERC units: undo the daily standardisation, floor at zero, cap at the
+# fuel-model ceiling
+sim.erc <- matrix(NA_real_, n.sim, n.valid)
 n.clip <- 0L
-for (s in 1:n.valid) {
-  e <- rep(nonzero.mean.gm[, s], nyear.sim) + rep(nonzero.sd.gm[, s], nyear.sim) * xs.cs[, s]
-  e[e < 0] <- 0
-  n.clip <- n.clip + sum(e > erc.max)
-  e[e > erc.max] <- erc.max
-  output.cs[, s] <- e
+for (pyrome in 1:n.valid) {
+  erc.vals <- rep(nonzero.mean.gm[, pyrome], nyear.sim) +
+              rep(nonzero.sd.gm[, pyrome], nyear.sim) * sim.resids[, pyrome]
+  erc.vals[erc.vals < 0] <- 0
+  n.clip <- n.clip + sum(erc.vals > erc.max)
+  erc.vals[erc.vals > erc.max] <- erc.max
+  sim.erc[, pyrome] <- erc.vals
 }
 cat(sprintf("ERC truncated at %d: %d of %d values clipped (%.5f%%)\n",
             erc.max, n.clip, n.sim * n.valid, 100 * n.clip / (n.sim * n.valid)))
-outmat.cs <- round(output.cs[-(1:365), , drop = FALSE])
+outmat.cs <- round(sim.erc[-(1:365), , drop = FALSE])
 colnames(outmat.cs)     <- namevec[valid.gm]
 storage.mode(outmat.cs) <- "integer"
-rm(output.cs); gc(verbose = FALSE)
+rm(sim.erc); gc(verbose = FALSE)
 write.table(outmat.cs, "erc-sim-regime-gridmet-int.csv", sep = ",", row.names = FALSE)
 
 p.cs  <- vapply(1:n.valid, function(s) mean(outmat.cs[, s] >= thr.p80[s]), 0)
-cs.sd <- vapply(1:n.valid, function(s) sd(xs.cs[, s]), 0) / sdresids.valid.gm
+cs.sd <- vapply(1:n.valid, function(s) sd(sim.resids[, s]), 0) / sdresids.valid.gm
 cat(sprintf("sd ratio: mean=%.3f  exceedance rate=%.4f (observed %.4f)\n",
             mean(cs.sd), mean(p.cs), mean(p.ob)))
 cat(sprintf("Correlation-matrix RMSE vs observed: regime=%.4f\n",
@@ -1074,7 +1143,8 @@ for (k in seq_along(show.py)) {
   png(fig.name("example", k), width = 1100, height = 620, res = 110)
   par(mfrow = c(1, 1), mar = c(3.0, 3.8, 2.4, 0.8), mgp = c(2.1, 0.7, 0))
   srcvec <- c(1,1,2,2)
-  
+  for(i in 1:4)
+  {
     src <- srcvec[i]
     v1 <- o[yr.obs == oy[1]]
     v2 <- o[yr.obs == oy[2]]
@@ -1110,9 +1180,10 @@ for (k in seq_along(show.py)) {
     legend("topleft", legend = c("Obs 1", "Obs 2", "Sim 1", "Sim 2"), 
     lty = c(1, 1, 2, 2), col = c("blue", "steelblue", "tomato", "red")
   )
+}
     dev.off()
 
-}
+  }
 
 
 ## ---- Figure set 3: ERC distribution, observed vs simulated ------------
