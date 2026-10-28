@@ -269,7 +269,8 @@ for(curstation in 1:validstations)
   rtemp <- sf.b / curfilt.sd
   curfilt.base <- curfilt.base / curfilt.sd
   curfilt.base <- curfilt.base * sd.est ###To ensure proper variance of ouptut residuals
-  
+  curfilt.base <- curfilt.base * r.b
+
   simresids.base[,curstation] <- curfilt.base
   outvec.mean <- dailymeanmat.base[,curstation]
   outvec.mean <- rep(outvec.mean,nyear.sim)
